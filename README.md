@@ -73,5 +73,5 @@ The tests stub the `frappe` module, so the access rules can be verified on a
 laptop and in CI without a Frappe installation.
 
 ---
-© Cominvent AS · MIT licensed. Apache Solr is a trademark of the Apache Software
+© Cominvent AS · licensed under the Apache License 2.0. Apache Solr is a trademark of the Apache Software
 Foundation; solrtraining.com is an independent training provider.

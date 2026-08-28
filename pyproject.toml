@@ -5,6 +5,7 @@ description = "Serve solrtraining.com course material behind Frappe LMS access c
 authors = [{ name = "Cominvent AS", email = "jh@cominvent.com" }]
 requires-python = ">=3.10"
 readme = "README.md"
+license = "Apache-2.0"
 # No runtime dependencies: the app runs inside a Frappe bench and uses only
 # frappe + werkzeug, which the bench already provides. (flit_core supports
 # dynamic metadata only for version/description — never declare
