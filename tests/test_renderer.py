@@ -1,4 +1,4 @@
-"""Tests for the deck renderer's routing and access rules.
+"""Tests for the material renderer's routing and access rules.
 
 Runs without a Frappe installation: a stub `frappe` module is injected before
 import, so the access logic can be verified on a laptop (and in CI) rather than
@@ -62,18 +62,19 @@ frappe.utils = types.SimpleNamespace(
 sys.modules["frappe"] = frappe
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from solrtraining_decks import renderer  # noqa: E402
+from solrtraining_material import renderer  # noqa: E402
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────
 def setup_site(tmp: Path, manifest: dict | None = None) -> None:
-    decks = tmp / "private" / "decks" / "cloud-architecture"
-    decks.mkdir(parents=True, exist_ok=True)
-    (decks / "index.html").write_text("<h1>deck</h1>")
-    (decks / "app.js").write_text("console.log(1)")
-    (tmp / "private" / "secret.txt").write_text("not a deck")
+    chapter = tmp / "private" / "material" / "cloud-architecture"
+    chapter.mkdir(parents=True, exist_ok=True)
+    (chapter / "index.html").write_text("<h1>deck</h1>")
+    (chapter / "app.js").write_text("console.log(1)")
+    (chapter / "lab.html").write_text("<h1>lab</h1>")
+    (tmp / "private" / "secret.txt").write_text("not course material")
     if manifest is not None:
-        (tmp / "private" / "decks" / "decks.json").write_text(json.dumps(manifest))
+        (tmp / "private" / "material" / "material.json").write_text(json.dumps(manifest))
     frappe._site_path = str(tmp)
     frappe._roles = []
     frappe._enrollments = []
@@ -82,32 +83,32 @@ def setup_site(tmp: Path, manifest: dict | None = None) -> None:
 
 
 def render(path: str):
-    return renderer.DeckRenderer(path).render()
+    return renderer.MaterialRenderer(path).render()
 
 
 # ── tests ─────────────────────────────────────────────────────────────────
-def test_can_render_only_decks_paths():
-    r = renderer.DeckRenderer
-    assert r("decks/cloud-architecture/index.html").can_render()
-    assert r("decks").can_render()
+def test_can_render_only_material_paths():
+    r = renderer.MaterialRenderer
+    assert r("material/cloud-architecture/index.html").can_render()
+    assert r("material").can_render()
     assert not r("courses/solr-cloud-architecture").can_render()
     assert not r("").can_render()
-    assert not r("decksomething/x").can_render()
+    assert not r("materialise/x").can_render()
 
 
 def test_guest_is_redirected_to_login(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "solr-cloud-architecture"}})
     frappe.session.user = "Guest"
-    res = render("decks/cloud-architecture/index.html")
+    res = render("material/cloud-architecture/index.html")
     assert res.status_code == 302
     assert "/login?redirect-to=" in res.headers["Location"]
 
 
-def test_enrolled_student_gets_the_deck(tmp_path):
+def test_enrolled_student_gets_the_material(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "solr-cloud-architecture"}})
     frappe.session.user = "student@example.com"
     frappe._enrollments = [{"member": "student@example.com", "course": "solr-cloud-architecture"}]
-    res = render("decks/cloud-architecture/index.html")
+    res = render("material/cloud-architecture/index.html")
     assert res.status_code == 200
     assert b"deck" in res.get_data()
     assert res.headers["Cache-Control"].startswith("private")
@@ -117,7 +118,7 @@ def test_other_course_student_is_refused(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "solr-cloud-architecture"}})
     frappe.session.user = "student@example.com"
     frappe._enrollments = [{"member": "student@example.com", "course": "solr-dense-vectors"}]
-    res = render("decks/cloud-architecture/index.html")
+    res = render("material/cloud-architecture/index.html")
     assert res.status_code == 403
 
 
@@ -127,7 +128,7 @@ def test_classroom_batch_member_gets_access(tmp_path):
     frappe.session.user = "student@example.com"
     frappe._batch_enrollments = ["autumn-2026-ops"]
     frappe._batch_courses = [{"parent": "autumn-2026-ops", "course": "solr-cloud-architecture"}]
-    res = render("decks/cloud-architecture/index.html")
+    res = render("material/cloud-architecture/index.html")
     assert res.status_code == 200
 
 
@@ -135,29 +136,29 @@ def test_staff_bypasses_enrollment(tmp_path):
     setup_site(tmp_path, {})           # empty manifest on purpose
     frappe.session.user = "jh@cominvent.com"
     frappe._roles = ["System Manager"]
-    assert render("decks/cloud-architecture/index.html").status_code == 200
+    assert render("material/cloud-architecture/index.html").status_code == 200
 
 
-def test_unmapped_deck_is_staff_only(tmp_path):
-    """Fail closed: a deck missing from decks.json is never served to students."""
+def test_unmapped_chapter_is_staff_only(tmp_path):
+    """Fail closed: a chapter missing from material.json is never served to students."""
     setup_site(tmp_path, {})
     frappe.session.user = "student@example.com"
     frappe._enrollments = [{"member": "student@example.com", "course": "solr-cloud-architecture"}]
-    assert render("decks/cloud-architecture/index.html").status_code == 403
+    assert render("material/cloud-architecture/index.html").status_code == 403
 
 
 def test_directory_serves_index(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "c"}})
     frappe.session.user = "s@example.com"
     frappe._enrollments = [{"member": "s@example.com", "course": "c"}]
-    assert render("decks/cloud-architecture/").status_code == 200
+    assert render("material/cloud-architecture/").status_code == 200
 
 
 def test_asset_content_type(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "c"}})
     frappe.session.user = "s@example.com"
     frappe._enrollments = [{"member": "s@example.com", "course": "c"}]
-    res = render("decks/cloud-architecture/app.js")
+    res = render("material/cloud-architecture/app.js")
     assert res.status_code == 200
     assert "javascript" in res.mimetype
 
@@ -167,15 +168,25 @@ def test_path_traversal_is_refused(tmp_path):
     frappe.session.user = "s@example.com"
     frappe._enrollments = [{"member": "s@example.com", "course": "c"}]
     frappe._roles = ["System Manager"]          # even staff cannot escape the root
-    res = render("decks/cloud-architecture/../../secret.txt")
+    res = render("material/cloud-architecture/../../secret.txt")
     assert res.status_code == 404
+
+
+def test_lab_assets_share_the_same_gate(tmp_path):
+    """Lab instructions live behind the same access rules as the slides."""
+    setup_site(tmp_path, {"cloud-architecture": {"course": "c"}})
+    frappe.session.user = "s@example.com"
+    frappe._enrollments = [{"member": "s@example.com", "course": "c"}]
+    assert render("material/cloud-architecture/lab.html").status_code == 200
+    frappe._enrollments = []
+    assert render("material/cloud-architecture/lab.html").status_code == 403
 
 
 def test_missing_file_is_404(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "c"}})
     frappe.session.user = "s@example.com"
     frappe._roles = ["System Manager"]
-    assert render("decks/cloud-architecture/nope.html").status_code == 404
+    assert render("material/cloud-architecture/nope.html").status_code == 404
 
 
 if __name__ == "__main__":

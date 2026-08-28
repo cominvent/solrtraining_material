@@ -1,7 +1,7 @@
-"""Serve solrtraining.com slide decks from /decks/… behind LMS access control.
+"""Serve solrtraining.com course material from /material/… behind LMS access control.
 
 Registered through the `page_renderer` hook, so Frappe asks this class first for
-every website path. It answers only for /decks/… and lets everything else fall
+every website path. It answers only for /material/… and lets everything else fall
 through to the normal LMS pages.
 
 Access rules, in order:
@@ -11,9 +11,10 @@ Access rules, in order:
   4. In a batch that includes the course → allowed  (LMS Batch Enrollment + Batch Course)
   5. otherwise                → 403
 
-Decks are plain static builds living OUTSIDE the web root, under
-    sites/<site>/private/decks/<chapter-slug>/…
-so the only way to reach them is through this renderer. Content is deployed
+Material (slide decks, lab instructions, lab bundles) is plain static content
+living OUTSIDE the web root, under
+    sites/<site>/private/material/<chapter-slug>/…
+so the only way to reach it is through this renderer. Content is deployed
 separately (rsync from the solrtraining.com repo) — never baked into the image.
 """
 from __future__ import annotations
@@ -26,26 +27,26 @@ from pathlib import Path
 import frappe
 from werkzeug.wrappers import Response
 
-DECKS_SUBPATH = ("private", "decks")
-MANIFEST = "decks.json"          # {"<chapter-slug>": {"course": "<lms course name>"}}
+MATERIAL_SUBPATH = ("private", "material")
+MANIFEST = "material.json"          # {"<chapter-slug>": {"course": "<lms course name>"}}
 STAFF_ROLES = {"System Manager", "Course Creator", "Moderator", "LMS Admin"}
 INDEX = "index.html"
 
 
-def decks_root() -> Path:
-    return Path(frappe.get_site_path(*DECKS_SUBPATH))
+def material_root() -> Path:
+    return Path(frappe.get_site_path(*MATERIAL_SUBPATH))
 
 
 def load_manifest() -> dict:
     """chapter-slug → {course: …}. Deployed alongside the decks, so the app never
     hardcodes curriculum. Missing manifest entry ⇒ staff-only (fail closed)."""
-    path = decks_root() / MANIFEST
+    path = material_root() / MANIFEST
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text())
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "solrtraining_decks: bad decks.json")
+        frappe.log_error(frappe.get_traceback(), "solrtraining_material: bad decks.json")
         return {}
 
 
@@ -67,9 +68,9 @@ def has_course_access(course: str) -> bool:
     return False
 
 
-def safe_deck_file(rel_path: str) -> Path | None:
+def safe_material_file(rel_path: str) -> Path | None:
     """Resolve a request path inside the decks root, refusing traversal."""
-    root = decks_root().resolve()
+    root = material_root().resolve()
     target = (root / rel_path).resolve()
     if root not in target.parents and target != root:
         return None
@@ -78,8 +79,8 @@ def safe_deck_file(rel_path: str) -> Path | None:
     return target if target.is_file() else None
 
 
-class DeckRenderer:
-    """Frappe page renderer for /decks/<chapter>/<file>."""
+class MaterialRenderer:
+    """Frappe page renderer for /material/<chapter>/<file>."""
 
     def __init__(self, path: str, http_status_code: int | None = None):
         self.path = (path or "").strip("/")
@@ -87,18 +88,18 @@ class DeckRenderer:
 
     # ── routing ───────────────────────────────────────────────────────────
     def can_render(self) -> bool:
-        return self.path == "decks" or self.path.startswith("decks/")
+        return self.path == "material" or self.path.startswith("material/")
 
     # ── serving ───────────────────────────────────────────────────────────
     def render(self) -> Response:
-        rel = self.path[len("decks"):].lstrip("/")
+        rel = self.path[len("material"):].lstrip("/")
         if not rel:
-            return self._forbidden("No deck requested.")
+            return self._forbidden("No material requested.")
 
         chapter = rel.split("/")[0]
 
         if frappe.session.user == "Guest":
-            target = frappe.utils.get_url(f"/decks/{rel}")
+            target = frappe.utils.get_url(f"/material/{rel}")
             return Response(status=302, headers={
                 "Location": f"/login?redirect-to={frappe.utils.quote(target)}"})
 
@@ -106,27 +107,27 @@ class DeckRenderer:
             course = (load_manifest().get(chapter) or {}).get("course")
             if not course:
                 return self._forbidden(
-                    "This deck is not published to students yet.")
+                    "This material is not published to students yet.")
             if not has_course_access(course):
                 return self._forbidden(
-                    "You do not have access to this course's slides. "
+                    "You do not have access to this course's material. "
                     "If you are attending a class, ask your instructor to add you.")
 
-        f = safe_deck_file(rel)
+        f = safe_material_file(rel)
         if not f:
-            return Response("Deck not found.", status=404, mimetype="text/plain")
+            return Response("Not found.", status=404, mimetype="text/plain")
 
         ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
         headers = {
-            # Decks are proprietary: never let a shared cache keep a copy.
+            # Course material is proprietary: never let a shared cache keep a copy.
             "Cache-Control": "private, max-age=300",
             "X-Content-Type-Options": "nosniff",
         }
         # nginx does the file I/O when X-Accel is configured for the site;
         # otherwise we stream it ourselves (fine for deck-sized assets).
-        accel = os.environ.get("SOLRTRAINING_DECKS_XACCEL")
+        accel = os.environ.get("SOLRTRAINING_MATERIAL_XACCEL")
         if accel:
-            rel_to_root = f.relative_to(decks_root().resolve())
+            rel_to_root = f.relative_to(material_root().resolve())
             headers["X-Accel-Redirect"] = f"{accel.rstrip('/')}/{rel_to_root}"
             return Response(b"", status=200, mimetype=ctype, headers=headers)
         return Response(f.read_bytes(), status=200, mimetype=ctype, headers=headers)
@@ -134,10 +135,10 @@ class DeckRenderer:
     # ── helpers ───────────────────────────────────────────────────────────
     def _forbidden(self, message: str) -> Response:
         html = (f"<!doctype html><meta charset=utf-8>"
-                f"<title>Slides — access</title>"
+                f"<title>Course material — access</title>"
                 f"<div style=\"font:17px/1.6 system-ui;max-width:38rem;margin:15vh auto;"
                 f"padding:0 1.5rem;color:#14202c\">"
-                f"<h1 style=\"color:#082b50;font-size:1.5rem\">Slides not available</h1>"
+                f"<h1 style=\"color:#082b50;font-size:1.5rem\">Material not available</h1>"
                 f"<p>{frappe.utils.escape_html(message)}</p>"
                 f"<p><a href=\"/courses\" style=\"color:#1597d4\">← Back to your courses</a></p>"
                 f"</div>")
