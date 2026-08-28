@@ -1,0 +1,15 @@
+[project]
+name = "solrtraining_decks"
+version = "0.1.0"
+description = "Serve solrtraining.com slide decks behind Frappe LMS access control"
+authors = [{ name = "Cominvent AS", email = "jh@cominvent.com" }]
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["dependencies"]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.module]
+name = "solrtraining_decks"
