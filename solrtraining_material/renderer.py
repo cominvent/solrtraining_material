@@ -32,6 +32,14 @@ MANIFEST = "material.json"          # {"<chapter-slug>": {"courses": ["<lms cour
 STAFF_ROLES = {"System Manager", "Course Creator", "Moderator", "LMS Admin"}
 INDEX = "index.html"
 
+# Directories under the material root that are NOT a chapter and carry no course
+# content: the shared build bundle (reveal.js, the deck theme) that every deck
+# references as /material/assets/…. They are served to any signed-in user —
+# gating them per chapter would 403 the stylesheet and script of a deck the
+# student is entitled to, leaving them a page of unstyled HTML.
+# Keep chapter imagery in the deck's own img/ directory so it stays gated.
+SHARED_DIRS = {"assets"}
+
 
 def material_root() -> Path:
     return Path(frappe.get_site_path(*MATERIAL_SUBPATH))
@@ -81,13 +89,24 @@ def has_course_access(course: str) -> bool:
 
 
 def safe_material_file(rel_path: str) -> Path | None:
-    """Resolve a request path inside the decks root, refusing traversal."""
+    """Resolve a request path inside the decks root, refusing traversal.
+
+    Frappe 301-redirects any `*.html` request to the extension-less path before a
+    page renderer is consulted, so /material/<chapter>/lab.html arrives here as
+    `<chapter>/lab`. An extension-less miss therefore retries with `.html` — the
+    retry stays inside the root because it only appends a suffix to an
+    already-validated path.
+    """
     root = material_root().resolve()
     target = (root / rel_path).resolve()
     if root not in target.parents and target != root:
         return None
     if target.is_dir():
         target = target / INDEX
+    if not target.is_file() and not target.suffix:
+        html = target.with_suffix(".html")
+        if html.is_file():
+            return html
     return target if target.is_file() else None
 
 
@@ -115,7 +134,7 @@ class MaterialRenderer:
             return Response(status=302, headers={
                 "Location": f"/login?redirect-to={frappe.utils.quote(target)}"})
 
-        if not is_staff():
+        if not is_staff() and chapter not in SHARED_DIRS:
             courses = courses_for(chapter)
             if not courses:
                 return self._forbidden(

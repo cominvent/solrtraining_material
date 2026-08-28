@@ -204,6 +204,48 @@ def test_lab_assets_share_the_same_gate(tmp_path):
     assert render("material/cloud-architecture/lab.html").status_code == 403
 
 
+def test_extensionless_path_falls_back_to_html(tmp_path):
+    """Frappe 301s /…/lab.html to /…/lab before any renderer runs, so the
+    extension-less form must still find lab.html."""
+    setup_site(tmp_path, {"cloud-architecture": {"courses": ["c"]}})
+    frappe.session.user = "s@example.com"
+    frappe._enrollments = [{"member": "s@example.com", "course": "c"}]
+    res = render("material/cloud-architecture/lab")
+    assert res.status_code == 200
+    assert b"lab" in res.get_data()
+
+
+def test_html_fallback_cannot_escape_the_root(tmp_path):
+    setup_site(tmp_path, {"cloud-architecture": {"courses": ["c"]}})
+    (tmp_path / "private" / "secret.html").write_text("nope")
+    frappe.session.user = "s@example.com"
+    frappe._roles = ["System Manager"]
+    assert render("material/cloud-architecture/../../secret").status_code == 404
+
+
+def test_shared_bundle_is_served_to_any_signed_in_user(tmp_path):
+    """Decks reference /material/assets/deck.js. Gating that per chapter would
+    serve an entitled student unstyled HTML with no reveal.js."""
+    setup_site(tmp_path, {"cloud-architecture": {"courses": ["c"]}})
+    shared = tmp_path / "private" / "material" / "assets"
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / "deck.js").write_text("reveal()")
+    frappe.session.user = "s@example.com"
+    frappe._enrollments = []                       # enrolled in nothing at all
+    res = render("material/assets/deck.js")
+    assert res.status_code == 200
+    assert b"reveal()" in res.get_data()
+
+
+def test_shared_bundle_still_requires_login(tmp_path):
+    setup_site(tmp_path, {})
+    shared = tmp_path / "private" / "material" / "assets"
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / "deck.js").write_text("reveal()")
+    frappe.session.user = "Guest"
+    assert render("material/assets/deck.js").status_code == 302
+
+
 def test_missing_file_is_404(tmp_path):
     setup_site(tmp_path, {"cloud-architecture": {"course": "c"}})
     frappe.session.user = "s@example.com"
