@@ -132,6 +132,28 @@ def test_classroom_batch_member_gets_access(tmp_path):
     assert res.status_code == 200
 
 
+def test_chapter_shared_by_two_courses(tmp_path):
+    """A chapter sold standalone is also generated into the module course that
+    contains it — enrollment in either one grants the material."""
+    setup_site(tmp_path, {"cloud-architecture":
+                          {"courses": ["solr-cloud-architecture", "solr-operations-1"]}})
+    frappe.session.user = "student@example.com"
+    frappe._enrollments = [{"member": "student@example.com", "course": "solr-operations-1"}]
+    assert render("material/cloud-architecture/index.html").status_code == 200
+    frappe._enrollments = [{"member": "student@example.com", "course": "solr-cloud-architecture"}]
+    assert render("material/cloud-architecture/index.html").status_code == 200
+    frappe._enrollments = [{"member": "student@example.com", "course": "solr-dense-vectors"}]
+    assert render("material/cloud-architecture/index.html").status_code == 403
+
+
+def test_legacy_singular_course_key_still_works(tmp_path):
+    """Manifests written before chapter reuse used {"course": "..."}."""
+    setup_site(tmp_path, {"cloud-architecture": {"course": "solr-cloud-architecture"}})
+    frappe.session.user = "s@example.com"
+    frappe._enrollments = [{"member": "s@example.com", "course": "solr-cloud-architecture"}]
+    assert render("material/cloud-architecture/index.html").status_code == 200
+
+
 def test_staff_bypasses_enrollment(tmp_path):
     setup_site(tmp_path, {})           # empty manifest on purpose
     frappe.session.user = "jh@cominvent.com"

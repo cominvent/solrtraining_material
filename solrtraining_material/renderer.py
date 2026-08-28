@@ -28,7 +28,7 @@ import frappe
 from werkzeug.wrappers import Response
 
 MATERIAL_SUBPATH = ("private", "material")
-MANIFEST = "material.json"          # {"<chapter-slug>": {"course": "<lms course name>"}}
+MANIFEST = "material.json"          # {"<chapter-slug>": {"courses": ["<lms course>", …]}}
 STAFF_ROLES = {"System Manager", "Course Creator", "Moderator", "LMS Admin"}
 INDEX = "index.html"
 
@@ -38,16 +38,28 @@ def material_root() -> Path:
 
 
 def load_manifest() -> dict:
-    """chapter-slug → {course: …}. Deployed alongside the decks, so the app never
-    hardcodes curriculum. Missing manifest entry ⇒ staff-only (fail closed)."""
+    """chapter-slug → {courses: [...]}. Deployed alongside the decks, so the app
+    never hardcodes curriculum. Missing manifest entry ⇒ staff-only (fail closed)."""
     path = material_root() / MANIFEST
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text())
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "solrtraining_material: bad decks.json")
+        frappe.log_error(frappe.get_traceback(), "solrtraining_material: bad material.json")
         return {}
+
+
+def courses_for(chapter: str) -> list[str]:
+    """Every course that contains this chapter.
+
+    A chapter sold standalone is also generated into the module course that
+    contains it, so ownership is a list. `course` (singular) is still read for
+    manifests written before that change.
+    """
+    entry = load_manifest().get(chapter) or {}
+    courses = entry.get("courses") or ([entry["course"]] if entry.get("course") else [])
+    return [c for c in courses if c]
 
 
 def is_staff() -> bool:
@@ -104,11 +116,11 @@ class MaterialRenderer:
                 "Location": f"/login?redirect-to={frappe.utils.quote(target)}"})
 
         if not is_staff():
-            course = (load_manifest().get(chapter) or {}).get("course")
-            if not course:
+            courses = courses_for(chapter)
+            if not courses:
                 return self._forbidden(
                     "This material is not published to students yet.")
-            if not has_course_access(course):
+            if not any(has_course_access(c) for c in courses):
                 return self._forbidden(
                     "You do not have access to this course's material. "
                     "If you are attending a class, ask your instructor to add you.")
